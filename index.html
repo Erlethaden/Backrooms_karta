@@ -117,6 +117,8 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
 .stat-lbl{font-size:12px;color:var(--t3);flex:1;min-width:0}
 .stat-lbl small{display:block;font-size:8px;color:var(--t0);letter-spacing:.5px;margin-top:1px}
 .eff{font-size:10px;color:var(--r3);margin-left:2px;white-space:nowrap;display:none;font-weight:700}
+.lockbox{margin-left:auto;font-size:9px;color:var(--t0);letter-spacing:1px;display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap}
+.lockbox input{accent-color:var(--y2);width:13px;height:13px}
 .surv-box{background:var(--bg2);border:1px solid var(--bd2);border-left:3px solid var(--bd3);padding:8px 10px;margin-top:8px;border-radius:2px}
 .surv-title{font-size:10px;letter-spacing:1.5px;color:var(--t2);display:flex;align-items:center;gap:8px;flex-wrap:wrap;text-transform:uppercase}
 .step{display:flex;align-items:center;gap:0;flex-shrink:0;border:1px solid var(--bd2);border-radius:2px;overflow:hidden}
@@ -266,9 +268,10 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
   </div>
 
   <div class="sec">
-    <div class="stitle">STATYSTYKI <span class="note">start: każda na 1 · do rozdania 8 pkt · maks. 6</span><span class="badge b-ok" id="bd-stat">0/8</span></div>
+    <div class="stitle">STATYSTYKI <span class="note">start: każda na 1 · do rozdania 8 pkt · maks. 6</span><span class="badge b-ok" id="bd-stat">0/8</span>
+      <label class="lockbox"><input type="checkbox" id="f-gotowa" onchange="onGotowaChange()"> postać gotowa</label></div>
     <div id="stat-box"></div>
-    <div class="hint">Każda statystyka zaczyna na poziomie 1. Masz 8 punktów do rozdania na start; jeden punkt = jeden poziom w górę (maksymalnie 6).</div>
+    <div class="hint">Każda statystyka zaczyna na poziomie 1. Masz 8 punktów do rozdania na start; jeden punkt = jeden poziom w górę (maksymalnie 6). Gdy zaznaczysz „postać gotowa", rozdawanie startowych punktów się zamyka, a przyciski przy statystykach zaczynają dodawać/odejmować premie z przedmiotów specjalnych lub treningu — bez górnego limitu.</div>
   </div>
 
   <div class="sec">
@@ -490,8 +493,24 @@ function buildStats(){
     inp.oninput=function(){ setStat(a.id, num(inp.value,STAT_MIN)); };
   });
 }
-function stat(id){ return clamp(num(S.stats[id],STAT_MIN),STAT_MIN,STAT_MAX); }
-function setStat(id,v){ S.stats[id]=clamp(v,STAT_MIN,STAT_MAX); refresh(); }
+function locked(){ return !!(el('f-gotowa') && el('f-gotowa').checked); }
+function onGotowaChange(){ refresh(); markDirty(); }
+/* każda statystyka: {a:baza z puli startowej, g:premia z przedmiotów/treningu po zamknięciu tworzenia}
+   akceptuje też stary format (goła liczba) z kart zapisanych przed tą funkcją */
+function statParts(v){
+  if(v && typeof v==='object') return { a:clamp(num(v.a,STAT_MIN),STAT_MIN,STAT_MAX), g:Math.max(0,num(v.g,0)) };
+  return { a:clamp(num(v,STAT_MIN),STAT_MIN,STAT_MAX), g:0 };
+}
+function statA(id){ return statParts(S.stats[id]).a; }
+function statG(id){ return statParts(S.stats[id]).g; }
+function statTotalFrom(v){ var p=statParts(v); return p.a+p.g; }
+function stat(id){ return statA(id)+statG(id); }
+function setStat(id,v){
+  var st=statParts(S.stats[id]);
+  if(locked()) st.g = Math.max(0, num(v,0)-st.a);
+  else         st.a = clamp(num(v,STAT_MIN),STAT_MIN,STAT_MAX);
+  S.stats[id]=st; refresh();
+}
 
 function buildMeters(){
   var box=el('state-box'); box.innerHTML='';
@@ -589,8 +608,8 @@ function renderLevels(){
 /* ═══════════ ODŚWIEŻANIE ═══════════ */
 function refresh(){
   STATS.forEach(function(a){ var i=el('st-'+a.id); if(i && document.activeElement!==i) i.value=stat(a.id); });
-  var spent=0; STATS.forEach(function(a){ spent += stat(a.id)-STAT_MIN; });
-  badge('bd-stat', spent+'/'+STAT_POOL+' pkt', spent===STAT_POOL?'ok':(spent<STAT_POOL?'warn':'over'));
+  var spent=0, grown=0; STATS.forEach(function(a){ spent += statA(a.id)-STAT_MIN; grown += statG(a.id); });
+  badge('bd-stat', spent+'/'+STAT_POOL+' pkt'+(grown?' · +'+grown+' z przedmiotów':''), spent===STAT_POOL?'ok':(spent<STAT_POOL?'warn':'over'));
 
   METERS.forEach(function(m){
     var i=el('mt-'+m.id); if(i && document.activeElement!==i) i.value=meter(m.id);
@@ -638,8 +657,8 @@ function selfUnlockBag(){
 
 /* ═══════════ ZAPIS: dane ═══════════ */
 function collectSheet(){
-  var d0={ v:1, stats:{}, levels:S.levels.slice(), eq:[], bag:[] };
-  STATS.forEach(function(a){ d0.stats[a.id]=stat(a.id); });
+  var d0={ v:1, stats:{}, levels:S.levels.slice(), eq:[], bag:[], gotowa:locked() };
+  STATS.forEach(function(a){ d0.stats[a.id]={ a:statA(a.id), g:statG(a.id) }; });
   for(var i=0;i<EQ_SLOTS;i++) d0.eq.push(S.eq[i]||{on:false,txt:''});
   for(var j=0;j<BAG_SLOTS;j++) d0.bag.push(S.bag[j]||{on:false,txt:''});
   TXT_FIELDS.forEach(function(f){ var e=el(f); if(e) d0[f]=e.value; });
@@ -652,7 +671,8 @@ function collectLive(){ return { syt:meter('syt'), nap:meter('nap'), pocz:meter(
 function applySheet(d0){
   if(!d0) return;
   suppressSave=true;
-  S.stats={}; STATS.forEach(function(a){ S.stats[a.id]=clamp(num((d0.stats||{})[a.id],STAT_MIN),STAT_MIN,STAT_MAX); });
+  S.stats={}; STATS.forEach(function(a){ S.stats[a.id]=statParts((d0.stats||{})[a.id]); });
+  var gb=el('f-gotowa'); if(gb) gb.checked=!!d0.gotowa;
   S.levels = Array.isArray(d0.levels)?d0.levels.slice():[];
   S.eq=[]; S.bag=[];
   for(var i=0;i<EQ_SLOTS;i++){ var e=(d0.eq||[])[i]||{}; S.eq[i]={on:!!e.on,txt:e.txt||''}; }
@@ -698,7 +718,8 @@ function pushLive(){
 function flash(t){ var m=el('save-msg'); m.textContent=t; setTimeout(function(){ m.textContent=''; },1500); }
 
 function resetSheet(){
-  STATS.forEach(function(a){ S.stats[a.id]=STAT_MIN; });
+  STATS.forEach(function(a){ S.stats[a.id]={a:STAT_MIN,g:0}; });
+  var gb=el('f-gotowa'); if(gb) gb.checked=false;
   METERS.forEach(function(m){ S.meters[m.id]=METER_MAX; });
   S.levels=['Level 0']; S.eq=[]; S.bag=[]; S.bagUnlocked=false;
   setPortrait('');
@@ -739,7 +760,7 @@ function openDiscordExport(){
   lines.push('**'+(s['f-imie']||'???')+'** — '+(live.level||'brak poziomu'));
   if(s['f-opis']) lines.push('_'+s['f-opis']+'_');
   lines.push('');
-  lines.push('**Statystyki:** '+STATS.map(function(a){ return a.n+' '+num((s.stats||{})[a.id],STAT_MIN); }).join(' · '));
+  lines.push('**Statystyki:** '+STATS.map(function(a){ return a.n+' '+statTotalFrom((s.stats||{})[a.id]); }).join(' · '));
   lines.push('**Stan:** Sytość '+live.syt+'/10 · Napojenie '+live.nap+'/10 · Poczytalność '+live.pocz+'/10');
   var sv=survivalCalc(live.syt,live.nap,live.pocz);
   if(sv.hindered) lines.push('⚠ '+sv.label);
@@ -773,7 +794,7 @@ function exportPNG(){
   function drawRest(){
     var y=110;
     y=section('STATYSTYKI',y);
-    STATS.forEach(function(a){ y=row(a.n,String(num((s.stats||{})[a.id],STAT_MIN)),y); });
+    STATS.forEach(function(a){ y=row(a.n,String(statTotalFrom((s.stats||{})[a.id])),y); });
     y+=12;
     y=section('STAN',y);
     y=row('Sytość',live.syt+'/10',y);
@@ -1136,8 +1157,9 @@ function gmDetail(id,keepScroll){
   h+='<div class="gd-sec">STATYSTYKI</div>';
   h+='<div class="gd-row"><span class="gd-l">Stan przetrwania</span><span class="gd-v"><span class="badge b-'+svGm.cls+'">'+svGm.label+'</span></span></div>';
   STATS.forEach(function(a){
-    var base=num((d0.stats||{})[a.id],STAT_MIN), eff=Math.max(1, base-svGm.malus);
-    h+=gdRow(a.n, base + (svGm.malus>0 && eff!==base ? ' <span style="color:var(--r3)">→ '+eff+'</span>' : ''));
+    var raw=(d0.stats||{})[a.id], parts=statParts(raw), base=parts.a+parts.g, eff=Math.max(1, base-svGm.malus);
+    var extra=(parts.g? ' <span style="color:var(--t0)">(baza '+parts.a+' +'+parts.g+' z przedmiotów)</span>' : '');
+    h+=gdRow(a.n, base + (svGm.malus>0 && eff!==base ? ' <span style="color:var(--r3)">→ '+eff+'</span>' : '') + extra);
   });
   if(d0['f-opis']){ h+='<div class="gd-sec">OPIS</div><div class="gd-row"><span class="gd-v" style="white-space:pre-wrap">'+escHtml(d0['f-opis'])+'</span></div>'; }
   var lvls=(d0.levels||[]);
@@ -1301,7 +1323,7 @@ function setupPWA(){ if('serviceWorker' in navigator){ window.addEventListener('
 /* ═══════════════ START ═══════════════ */
 function boot(){
   buildStats(); buildMeters(); buildSlots(); bindInputs();
-  STATS.forEach(function(a){ S.stats[a.id]=STAT_MIN; });
+  STATS.forEach(function(a){ S.stats[a.id]={a:STAT_MIN,g:0}; });
   METERS.forEach(function(m){ S.meters[m.id]=METER_MAX; });
   S.levels=['Level 0'];
   el('bag-self').style.display='';   /* daj graczowi awaryjny guzik odblokowania */
