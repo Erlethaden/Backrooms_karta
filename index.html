@@ -318,6 +318,12 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
   </div>
 
   <div class="sec">
+    <div class="stitle">UMIEJĘTNOŚCI SPECJALNE <span class="note">jedna umiejętność na linię</span></div>
+    <textarea class="ta" id="f-umiej" placeholder="Nazwa umiejętności — opis — poziom&#10;np. Wyczucie Anomalii — wyczuwasz zbliżającą się entytę zanim ją zobaczysz — poziom 1"></textarea>
+    <div class="hint">Format dowolny, ale polecany: <b>Nazwa umiejętności — opis — poziom</b>, jedna umiejętność w każdej linii.</div>
+  </div>
+
+  <div class="sec">
     <div class="stitle">NOTATKI</div>
     <textarea class="ta" id="f-notatki" placeholder="wątki, tropy, spotkane byty, plany…"></textarea>
   </div>
@@ -467,7 +473,7 @@ var METERS = [
 ];
 var METER_MAX=10;
 var EQ_SLOTS=3, BAG_SLOTS=10;
-var TXT_FIELDS=['f-imie','f-opis','f-level','f-notatki'];
+var TXT_FIELDS=['f-imie','f-opis','f-level','f-umiej','f-notatki'];
 
 /* ─── stan lokalny ─── */
 var S = { stats:{}, levels:[], eq:[], bag:[], meters:{}, bagUnlocked:false };
@@ -646,7 +652,7 @@ function badge(id,txt,cls){ var b=el(id); b.textContent=txt; b.className='badge 
 
 /* pola tekstowe: imię/opis/notatki → zwykły zapis; poziom → zapis „na żywo" (widzi go MG) */
 function bindInputs(){
-  ['f-imie','f-opis','f-notatki'].forEach(function(id){ var e=el(id); if(e) e.oninput=markDirty; });
+  ['f-imie','f-opis','f-umiej','f-notatki'].forEach(function(id){ var e=el(id); if(e) e.oninput=markDirty; });
   var lv=el('f-level'); if(lv) lv.oninput=function(){ markDirty(); pushLive(); };
 }
 
@@ -773,6 +779,7 @@ function openDiscordExport(){
   }
   var lv=(s.levels||[]);
   lines.push('**Odwiedzone poziomy:** '+(lv.length?lv.join(' · '):'—'));
+  if(s['f-umiej']){ lines.push(''); lines.push('**Umiejętności specjalne:**'); lines.push(s['f-umiej']); }
   el('modal-ta').value=lines.join('\n');
   el('modal-import').style.display='none'; el('modal-copy').style.display='';
   openModal('EKSPORT DO DISCORD — skopiuj i wklej na kanale');
@@ -781,7 +788,7 @@ function openDiscordExport(){
 /* ═══════════ EKSPORT → PNG (karta jako obrazek) ═══════════ */
 function exportPNG(){
   var s=collectSheet(), live=collectLive();
-  var W=760,H=1040;
+  var W=760,H=1200;
   var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   var ctx=cv.getContext('2d');
   ctx.fillStyle='#050503'; ctx.fillRect(0,0,W,H);
@@ -821,7 +828,16 @@ function exportPNG(){
     y=section('ODWIEDZONE POZIOMY',y);
     ctx.font='13px "JetBrains Mono",monospace'; ctx.fillStyle='#b8b184';
     var lv=(s.levels||[]);
-    ctx.fillText(lv.length?lv.join(' · '):'—',40,y);
+    ctx.fillText(lv.length?lv.join(' · '):'—',40,y); y+=24;
+    var skills=(s['f-umiej']||'').split('\n').map(function(x){return x.trim();}).filter(Boolean);
+    if(skills.length){
+      y+=10; y=section('UMIEJĘTNOŚCI SPECJALNE',y);
+      ctx.font='13px "JetBrains Mono",monospace'; ctx.fillStyle='#b8b184';
+      for(var si=0; si<skills.length; si++){
+        if(y>H-40){ ctx.fillText('… (więcej w apce)',40,y); break; }
+        ctx.fillText(skills[si].length>78?skills[si].slice(0,78)+'…':skills[si],40,y); y+=20;
+      }
+    }
     cv.toBlob(function(blob){
       var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(s['f-imie']||'karta').replace(/\s+/g,'_')+'.png';
       document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },200);
@@ -1171,6 +1187,7 @@ function gmDetail(id,keepScroll){
     var bagTxt=(d0.bag||[]).filter(function(x){return x&&x.txt;}).map(function(x){return (x.on?'☑ ':'☐ ')+escHtml(x.txt);});
     h+='<div class="gd-sec">PLECAK</div><div class="gd-row"><span class="gd-v" style="white-space:pre-line">'+(bagTxt.length?bagTxt.join('\n'):'—')+'</span></div>';
   }
+  if(d0['f-umiej']) h+='<div class="gd-sec">UMIEJĘTNOŚCI SPECJALNE</div><div class="gd-row"><span class="gd-v" style="white-space:pre-wrap">'+escHtml(d0['f-umiej'])+'</span></div>';
   if(d0['f-notatki']) h+='<div class="gd-sec">NOTATKI</div><div class="gd-row"><span class="gd-v" style="white-space:pre-wrap">'+escHtml(d0['f-notatki'])+'</span></div>';
 
   var body=el('gd-body');
