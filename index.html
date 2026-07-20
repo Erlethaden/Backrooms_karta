@@ -322,6 +322,11 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
   <div class="sec" style="display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--bd1);padding-top:10px">
     <button class="btn btn-sm btn-dim" onclick="openExport()">Eksport kodu</button>
     <button class="btn btn-sm btn-dim" onclick="openImport()">Import kodu</button>
+    <button class="btn btn-sm btn-dim" onclick="openDiscordExport()">Eksport → Discord</button>
+    <button class="btn btn-sm btn-dim" onclick="exportPNG()">Eksport → PNG</button>
+    <button class="btn btn-sm btn-dim" onclick="downloadBackup()">Pobierz kopię (.json)</button>
+    <button class="btn btn-sm btn-dim" onclick="el('backup-file').click()">Wczytaj kopię (.json)</button>
+    <input type="file" id="backup-file" accept="application/json" style="display:none" onchange="loadBackupFile(this)">
     <button class="btn btn-sm btn-red" onclick="confirmReset()">Wyczyść kartę</button>
     <span id="save-msg" style="font-size:10px;color:var(--y3);align-self:center"></span>
   </div>
@@ -340,11 +345,34 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
 
 <!-- ═══════════════ ADMIN ═══════════════ -->
 <section id="adm-section">
+  <div class="stitle">UŻYTKOWNICY I ROLE <span class="note">nadawanie / odbieranie MG</span></div>
   <div style="display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap;align-items:center">
     <button class="btn btn-sm" onclick="admLoad()">Odśwież</button>
     <span id="adm-status" style="font-size:9px;color:var(--y3)"></span>
   </div>
   <div class="adm-wrap"><table class="adm-tbl" id="adm-users"></table></div>
+
+  <div class="stitle" style="margin-top:20px">WSZYSTKIE POSTACIE <span class="note">podgląd i kasowanie kart graczy</span></div>
+  <div style="display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-sm" onclick="admLoadChars()">Odśwież</button>
+    <button class="btn btn-sm btn-dim" onclick="admBackupAll()">Pobierz kopię wszystkich (.json)</button>
+    <span id="adm-char-status" style="font-size:9px;color:var(--y3)"></span>
+  </div>
+  <div class="adm-wrap"><table class="adm-tbl" id="adm-chars"></table></div>
+
+  <div class="stitle" style="margin-top:20px">DUCHY I DUBLE <span class="note">wpisy w rosterze bez karty źródłowej</span></div>
+  <div style="display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-sm btn-dim" onclick="cleanGhosts()">Skanuj i wyczyść</button>
+    <span id="adm-ghost-status" style="font-size:9px;color:var(--y3)"></span>
+  </div>
+  <div class="hint">Unikalne imiona są blokowane już przy zapisie (rezerwacja w bazie w transakcji), więc dubli praktycznie nie da się stworzyć z poziomu apki. To narzędzie sprząta osierocone wpisy w rosterze — np. po ręcznej ingerencji w bazę albo przerwanym kasowaniu.</div>
+
+  <div class="stitle" style="margin-top:20px">LOGI <span class="note">ostatnie 150 zdarzeń: karty, role, akcje MG</span></div>
+  <div style="display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-sm" onclick="admLoadLogs()">Odśwież</button>
+    <span id="adm-log-status" style="font-size:9px;color:var(--y3)"></span>
+  </div>
+  <div class="adm-wrap"><table class="adm-tbl" id="adm-logs"></table></div>
 </section>
 
 <!-- portret crop -->
@@ -704,6 +732,103 @@ function doImport(){
   }catch(e){ el('modal-status').textContent='Nie rozpoznaję kodu. Wklej całość z eksportu.'; }
 }
 
+/* ═══════════ EKSPORT → DISCORD (tekst) ═══════════ */
+function openDiscordExport(){
+  var s=collectSheet(), live=collectLive();
+  var lines=[];
+  lines.push('**'+(s['f-imie']||'???')+'** — '+(live.level||'brak poziomu'));
+  if(s['f-opis']) lines.push('_'+s['f-opis']+'_');
+  lines.push('');
+  lines.push('**Statystyki:** '+STATS.map(function(a){ return a.n+' '+num((s.stats||{})[a.id],STAT_MIN); }).join(' · '));
+  lines.push('**Stan:** Sytość '+live.syt+'/10 · Napojenie '+live.nap+'/10 · Poczytalność '+live.pocz+'/10');
+  var sv=survivalCalc(live.syt,live.nap,live.pocz);
+  if(sv.hindered) lines.push('⚠ '+sv.label);
+  var eq=(s.eq||[]).filter(function(x){return x&&x.txt;}).map(function(x){return (x.on?'☑':'☐')+' '+x.txt;});
+  lines.push('**EQ podręczne:** '+(eq.length?eq.join(' · '):'—'));
+  if(live.plecak){
+    var bag=(s.bag||[]).filter(function(x){return x&&x.txt;}).map(function(x){return (x.on?'☑':'☐')+' '+x.txt;});
+    lines.push('**Plecak:** '+(bag.length?bag.join(' · '):'—'));
+  }
+  var lv=(s.levels||[]);
+  lines.push('**Odwiedzone poziomy:** '+(lv.length?lv.join(' · '):'—'));
+  el('modal-ta').value=lines.join('\n');
+  el('modal-import').style.display='none'; el('modal-copy').style.display='';
+  openModal('EKSPORT DO DISCORD — skopiuj i wklej na kanale');
+}
+
+/* ═══════════ EKSPORT → PNG (karta jako obrazek) ═══════════ */
+function exportPNG(){
+  var s=collectSheet(), live=collectLive();
+  var W=760,H=1040;
+  var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  var ctx=cv.getContext('2d');
+  ctx.fillStyle='#050503'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#c9b83a'; ctx.lineWidth=3; ctx.strokeRect(6,6,W-12,H-12);
+  ctx.fillStyle='#e8d44a'; ctx.font='700 26px "JetBrains Mono",monospace'; ctx.textBaseline='top';
+  ctx.fillText('BACKROOMS — '+(s['f-imie']||'???'), 30, 28);
+  ctx.fillStyle='#8f895f'; ctx.font='13px "JetBrains Mono",monospace';
+  ctx.fillText('Obecny poziom: '+(live.level||'—'), 30, 62);
+  function section(title,y){ ctx.fillStyle='#d6cfa0'; ctx.font='700 15px "JetBrains Mono",monospace'; ctx.fillText(title,30,y); return y+26; }
+  function row(l,v,y,col){ ctx.font='14px "JetBrains Mono",monospace'; ctx.fillStyle='#b8b184'; ctx.fillText(l,40,y); ctx.fillStyle=col||'#e8d44a'; ctx.fillText(v,260,y); return y+22; }
+  function drawRest(){
+    var y=110;
+    y=section('STATYSTYKI',y);
+    STATS.forEach(function(a){ y=row(a.n,String(num((s.stats||{})[a.id],STAT_MIN)),y); });
+    y+=12;
+    y=section('STAN',y);
+    y=row('Sytość',live.syt+'/10',y);
+    y=row('Napojenie',live.nap+'/10',y);
+    y=row('Poczytalność',live.pocz+'/10',y);
+    var sv=survivalCalc(live.syt,live.nap,live.pocz);
+    if(sv.hindered){ ctx.font='13px "JetBrains Mono",monospace'; ctx.fillStyle='#e8734a'; ctx.fillText('⚠ '+sv.label,40,y); y+=24; }
+    y+=12;
+    y=section('EQ PODRĘCZNE',y);
+    ctx.font='13px "JetBrains Mono",monospace'; ctx.fillStyle='#b8b184';
+    var eq=(s.eq||[]).filter(function(x){return x&&x.txt;});
+    if(!eq.length){ ctx.fillText('—',40,y); y+=20; }
+    eq.forEach(function(e){ ctx.fillText((e.on?'☑ ':'☐ ')+e.txt,40,y); y+=20; });
+    y+=10;
+    if(live.plecak){
+      y=section('PLECAK',y);
+      ctx.font='13px "JetBrains Mono",monospace'; ctx.fillStyle='#b8b184';
+      var bag=(s.bag||[]).filter(function(x){return x&&x.txt;});
+      if(!bag.length){ ctx.fillText('—',40,y); y+=20; }
+      bag.forEach(function(b){ ctx.fillText((b.on?'☑ ':'☐ ')+b.txt,40,y); y+=20; });
+      y+=10;
+    }
+    y=section('ODWIEDZONE POZIOMY',y);
+    ctx.font='13px "JetBrains Mono",monospace'; ctx.fillStyle='#b8b184';
+    var lv=(s.levels||[]);
+    ctx.fillText(lv.length?lv.join(' · '):'—',40,y);
+    cv.toBlob(function(blob){
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=(s['f-imie']||'karta').replace(/\s+/g,'_')+'.png';
+      document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },200);
+      toast('Zapisano PNG.');
+    },'image/png');
+  }
+  if(s.portret){
+    var img=new Image();
+    img.onload=function(){ ctx.drawImage(img,W-190,26,150,150); drawRest(); };
+    img.onerror=drawRest; img.src=s.portret;
+  } else drawRest();
+}
+
+/* ═══════════ KOPIA ZAPASOWA (.json) ═══════════ */
+function downloadBackup(){
+  var s=collectSheet();
+  downloadJSON((s['f-imie']||'karta').replace(/\s+/g,'_')+'-backup.json',
+    { sheet:s, live:collectLive(), exportedAt:new Date().toISOString() });
+}
+function loadBackupFile(inp){
+  var f=inp.files&&inp.files[0]; inp.value=''; if(!f) return;
+  var r=new FileReader();
+  r.onload=function(){
+    try{ var o=JSON.parse(r.result); applySheet(o.sheet); applyLive(o.live); markDirty(); pushLive(); toast('Wczytano kopię z pliku.'); }
+    catch(e){ alert('Nie rozpoznaję pliku kopii zapasowej.'); }
+  };
+  r.readAsText(f);
+}
+
 /* ═══════════ TOAST ═══════════ */
 var toastTimer=null;
 function toast(t){ el('toast-t').textContent=t; var e=el('toast'); e.className='show';
@@ -815,7 +940,7 @@ function showMainTab(name){
   el('adm-section').style.display=name==='adm'?'block':'none';
   ['karta','gm','adm'].forEach(function(t){ var b=el('tbtn-'+t); if(b) b.classList.toggle('active',t===name); });
   if(name==='gm') gmLoadRoster();
-  if(name==='adm') admLoad();
+  if(name==='adm'){ admLoad(); admLoadChars(); admLoadLogs(); }
 }
 
 /* ─── unikalne imiona ─── */
@@ -884,6 +1009,7 @@ function deleteCurrentChar(){
     if(slug) p.push(fbDB.collection('names').doc(slug).delete().catch(function(){}));
     return Promise.all(p);
   }).then(function(){
+    logEvent('postać: usunięta (gracz)', name);
     currentCharId=null; currentSlug=''; isNewChar=false;
     el('btn-del-char').style.display='none'; el('char-select').value=''; resetSheet(); loadCharList(); cloudStatus('usunięto','g');
   }).catch(function(e){ alert('Nie udało się usunąć: '+e.message); });
@@ -915,7 +1041,7 @@ function cloudSaveSheet(){
       return writeRoster(charId,name,sheet);
     }).then(function(){
       cloudStatus('zapisano w chmurze','g');
-      if(!knownChar(charId)){ charCache.unshift({id:charId,imie:name,slug:slug}); rebuildCharSelect(); openChar(charId); }
+      if(!knownChar(charId)){ logEvent('postać: utworzona', name); charCache.unshift({id:charId,imie:name,slug:slug}); rebuildCharSelect(); openChar(charId); }
     }).catch(function(e){
       cloudStatus(e.message==='TAKEN'?'to imię ma już ktoś inny':'błąd zapisu: '+(e.code||e.message),'r');
     });
@@ -934,7 +1060,7 @@ function writeRoster(charId,name,sheet){
   var live=collectLive();
   return fbDB.collection('roster').doc(charId).set({
     uid:fbUser.uid, nick:userNick||'?', imie:name, opis:(sheet['f-opis']||''),
-    level:(sheet['f-level']||''), portret:sheet.portret||'',
+    level:(sheet['f-level']||''), portret:sheet.portret||'', nameSlug:currentSlug||'',
     syt:live.syt, nap:live.nap, pocz:live.pocz, plecak:live.plecak,
     lastModified:firebase.firestore.FieldValue.serverTimestamp(), charData:sheet
   },{merge:true});
@@ -1045,8 +1171,12 @@ function gmCurLive(id){ var c=gmRoster.filter(function(x){return x.id===id;})[0]
   return { syt:num(c.syt,METER_MAX), nap:num(c.nap,METER_MAX), pocz:num(c.pocz,METER_MAX), plecak:!!c.plecak, level:(c.level||'') }; }
 function gmSetMeter(id,key,val){ var live=gmCurLive(id); live[key]=clamp(num(val,0),0,METER_MAX); gmWrite(id,{live:live}); }
 function gmBump(id,key,d){ var live=gmCurLive(id); live[key]=clamp(live[key]+d,0,METER_MAX); gmWrite(id,{live:live}); }
-function gmSetBag(id,on){ var live=gmCurLive(id); live.plecak=!!on; gmWrite(id,{live:live}); }
-function gmSetLevel(id,val){ var live=gmCurLive(id); live.level=val; gmWrite(id,{live:live}); }
+function gmSetBag(id,on){ var live=gmCurLive(id); live.plecak=!!on; gmWrite(id,{live:live});
+  var c=gmRoster.filter(function(x){return x.id===id;})[0];
+  logEvent('MG: plecak '+(on?'odblokowany':'zablokowany'), (c&&c.imie)||id); }
+function gmSetLevel(id,val){ var live=gmCurLive(id); live.level=val; gmWrite(id,{live:live});
+  var c=gmRoster.filter(function(x){return x.id===id;})[0];
+  logEvent('MG: zmiana poziomu', ((c&&c.imie)||id)+' → '+val); }
 
 /* ═══════════════ PANEL ADMINA (nadawanie MG) ═══════════════ */
 function admLoad(){
@@ -1071,8 +1201,98 @@ function admRender(users,roles){
 }
 function admToggleGM(uid,on){
   fbDB.collection('roles').doc(uid).set({ gm:on, admin:false },{merge:true})
-    .then(function(){ el('adm-status').textContent=on?'Nadano MG.':'Odebrano MG.'; admLoad(); })
+    .then(function(){ el('adm-status').textContent=on?'Nadano MG.':'Odebrano MG.'; logEvent('rola: MG '+(on?'nadana':'odebrana'), uid); admLoad(); })
     .catch(function(e){ el('adm-status').textContent='Błąd: '+(e.code||e.message); });
+}
+
+/* ═══════════════ ADMIN: wszystkie postacie / duchy / backup ═══════════════ */
+var admChars=[];
+function admLoadChars(){
+  if(!fbDB||!userRole.admin) return;
+  el('adm-char-status').textContent='wczytuję…';
+  fbDB.collection('roster').get().then(function(snap){
+    admChars=snap.docs.map(function(x){ var v=x.data(); v.id=x.id; return v; });
+    admRenderChars(); el('adm-char-status').textContent=admChars.length+' kart';
+  }).catch(function(e){ el('adm-char-status').textContent='Błąd: '+(e.code||e.message); });
+}
+function admRenderChars(){
+  var h='<tr><th>IMIĘ</th><th>GRACZ</th><th>POZIOM</th><th>PLECAK</th><th></th></tr>';
+  admChars.forEach(function(c){
+    h+='<tr><td>'+escHtml(c.imie||'???')+'</td><td>'+escHtml(c.nick||'—')+'</td><td>'+escHtml(c.level||'—')+'</td>'+
+       '<td>'+(c.plecak?'<span class="chip on">odblokowany</span>':'<span class="chip lock">zablokowany</span>')+'</td>'+
+       '<td><button class="btn btn-sm btn-red" onclick="adminDeleteChar(\''+c.id+'\')">Usuń</button></td></tr>';
+  });
+  el('adm-chars').innerHTML=h||'<tr><td>brak kart</td></tr>';
+}
+function adminDeleteChar(id){
+  var c=admChars.filter(function(x){return x.id===id;})[0]; if(!c||!c.uid) return;
+  if(prompt('Kasujesz na stałe kartę „'+(c.imie||'???')+'" gracza '+(c.nick||'?')+'. Wpisz USUŃ, żeby potwierdzić:')!=='USUŃ') return;
+  var slug=c.nameSlug||'';
+  var p=[ fbDB.collection('users').doc(c.uid).collection('characters').doc(id).delete().catch(function(){}),
+          fbDB.collection('roster').doc(id).delete().catch(function(){}) ];
+  if(slug) p.push(fbDB.collection('names').doc(slug).delete().catch(function(){}));
+  Promise.all(p).then(function(){
+    logEvent('postać: usunięta (admin)', (c.imie||'???')+' · gracz '+(c.nick||'?'));
+    toast('Usunięto kartę.'); admLoadChars();
+  }).catch(function(e){ alert('Nie udało się usunąć: '+e.message); });
+}
+function admBackupAll(){
+  if(!admChars.length){ toast('Najpierw wczytaj listę postaci (Odśwież).'); return; }
+  downloadJSON('backrooms-backup-wszystkich-'+Date.now()+'.json', admChars);
+}
+function downloadJSON(filename,obj){
+  var blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },200);
+}
+
+/* duchy: wpisy w rosterze bez istniejącej karty źródłowej (osierocone przez ręczne kasowanie w bazie itp.) */
+function cleanGhosts(){
+  if(!fbDB||!userRole.admin) return;
+  el('adm-ghost-status').textContent='skanuję…';
+  fbDB.collection('roster').get().then(function(snap){
+    var rows=snap.docs.map(function(x){ var v=x.data(); v.id=x.id; return v; });
+    return Promise.all(rows.map(function(r){
+      if(!r.uid) return {r:r,ghost:true};
+      return fbDB.collection('users').doc(r.uid).collection('characters').doc(r.id).get()
+        .then(function(d){ return {r:r,ghost:!d.exists}; });
+    }));
+  }).then(function(results){
+    var ghosts=results.filter(function(x){return x.ghost;}).map(function(x){return x.r;});
+    if(!ghosts.length){ el('adm-ghost-status').textContent='Czysto — brak duchów.'; return; }
+    if(!confirm('Znaleziono '+ghosts.length+' osieroconych wpisów w rosterze (bez karty źródłowej). Usunąć je?')){ el('adm-ghost-status').textContent='Anulowano.'; return; }
+    var p=[];
+    ghosts.forEach(function(g){
+      p.push(fbDB.collection('roster').doc(g.id).delete().catch(function(){}));
+      var slug=g.nameSlug||'';
+      if(slug) p.push(fbDB.collection('names').doc(slug).delete().catch(function(){}));
+    });
+    return Promise.all(p).then(function(){
+      logEvent('duchy: wyczyszczono', ghosts.length+' wpisów');
+      el('adm-ghost-status').textContent='Usunięto '+ghosts.length+' duchów.';
+      admLoadChars();
+    });
+  }).catch(function(e){ el('adm-ghost-status').textContent='Błąd: '+(e.code||e.message); });
+}
+
+/* ═══════════════ LOGI ═══════════════ */
+function logEvent(action,detail){
+  if(!fbDB||!fbUser) return;
+  fbDB.collection('logs').add({
+    ts:firebase.firestore.FieldValue.serverTimestamp(),
+    uid:fbUser.uid, nick:userNick||'?', action:action, detail:detail||''
+  }).catch(function(){});
+}
+function admLoadLogs(){
+  if(!fbDB||!userRole.admin) return;
+  el('adm-log-status').textContent='wczytuję…';
+  fbDB.collection('logs').orderBy('ts','desc').limit(150).get().then(function(snap){
+    var h='<tr><th>KIEDY</th><th>KTO</th><th>ZDARZENIE</th><th>SZCZEGÓŁY</th></tr>';
+    snap.docs.forEach(function(x){ var v=x.data();
+      h+='<tr><td>'+timeAgo(v.ts)+'</td><td>'+escHtml(v.nick||'?')+'</td><td>'+escHtml(v.action||'')+'</td><td>'+escHtml(v.detail||'')+'</td></tr>'; });
+    el('adm-logs').innerHTML=h||'<tr><td>brak wpisów</td></tr>';
+    el('adm-log-status').textContent=snap.size+' wpisów';
+  }).catch(function(e){ el('adm-log-status').textContent='Błąd: '+(e.code||e.message); });
 }
 
 /* ═══════════════ PWA ═══════════════ */
