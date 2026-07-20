@@ -447,6 +447,7 @@ var FIREBASE_CONFIG = {
    po pierwszym zalogowaniu. Wklej tu i zapisz plik. */
 var ADMIN_UID = 'XMKYgEGHhBZluaLqKkUjJzfQ6el2';
 var MAX_CHARS = 5;
+var LOG_TTL_DAYS = 3;
 var BUILD = '2026-07-20 · b1';
 var SAVE_KEY = 'backrooms-kp-v1';
 
@@ -1302,19 +1303,42 @@ function logEvent(action,detail){
   if(!fbDB||!fbUser) return;
   fbDB.collection('logs').add({
     ts:firebase.firestore.FieldValue.serverTimestamp(),
+    expireAt:firebase.firestore.Timestamp.fromMillis(Date.now()+LOG_TTL_DAYS*24*60*60*1000),
     uid:fbUser.uid, nick:userNick||'?', action:action, detail:detail||''
   }).catch(function(){});
 }
+/* sprzątanie logów starszych niż LOG_TTL_DAYS — best-effort, uruchamia się przy każdym wejściu w panel admina.
+   Docelowe, gwarantowane kasowanie (nawet gdy nikt nie otworzy panelu) ustaw jako natywne
+   TTL Firestore: Firebase Console → Firestore Database → TTL → kolekcja „logs", pole „expireAt". */
 function admLoadLogs(){
   if(!fbDB||!userRole.admin) return;
   el('adm-log-status').textContent='wczytuję…';
-  fbDB.collection('logs').orderBy('ts','desc').limit(150).get().then(function(snap){
-    var h='<tr><th>KIEDY</th><th>KTO</th><th>ZDARZENIE</th><th>SZCZEGÓŁY</th></tr>';
-    snap.docs.forEach(function(x){ var v=x.data();
-      h+='<tr><td>'+timeAgo(v.ts)+'</td><td>'+escHtml(v.nick||'?')+'</td><td>'+escHtml(v.action||'')+'</td><td>'+escHtml(v.detail||'')+'</td></tr>'; });
-    el('adm-logs').innerHTML=h||'<tr><td>brak wpisów</td></tr>';
-    el('adm-log-status').textContent=snap.size+' wpisów';
-  }).catch(function(e){ el('adm-log-status').textContent='Błąd: '+(e.code||e.message); });
+  var nowMs=Date.now();
+  fbDB.collection('logs').where('expireAt','<=',firebase.firestore.Timestamp.fromMillis(nowMs)).get()
+    .then(function(snap){
+      if(!snap.size) return 0;
+      var batch=fbDB.batch(); snap.docs.forEach(function(d){ batch.delete(d.ref); });
+      return batch.commit().then(function(){ return snap.size; });
+    }).catch(function(){ return 0; })
+    .then(function(removedByTTL){
+      return fbDB.collection('logs').orderBy('ts','desc').limit(150).get().then(function(snap){
+        var cutoffMs=nowMs-LOG_TTL_DAYS*24*60*60*1000, toDelete=[], shown=0;
+        var h='<tr><th>KIEDY</th><th>KTO</th><th>ZDARZENIE</th><th>SZCZEGÓŁY</th></tr>';
+        snap.docs.forEach(function(x){
+          var v=x.data(), tsMs=(v.ts&&v.ts.toMillis)?v.ts.toMillis():0;
+          if(!v.expireAt && tsMs && tsMs<=cutoffMs){ toDelete.push(x.ref); return; } /* stary wpis sprzed tej funkcji — dobijamy po dacie zdarzenia */
+          shown++;
+          h+='<tr><td>'+timeAgo(v.ts)+'</td><td>'+escHtml(v.nick||'?')+'</td><td>'+escHtml(v.action||'')+'</td><td>'+escHtml(v.detail||'')+'</td></tr>';
+        });
+        el('adm-logs').innerHTML=shown?h:'<tr><td>brak wpisów</td></tr>';
+        var cleanup=Promise.resolve();
+        if(toDelete.length){ var b=fbDB.batch(); toDelete.forEach(function(r){ b.delete(r); }); cleanup=b.commit(); }
+        return cleanup.then(function(){
+          var removed=removedByTTL+toDelete.length;
+          el('adm-log-status').textContent=shown+' wpisów'+(removed?' · wyczyszczono '+removed+' starszych niż '+LOG_TTL_DAYS+' dni':'');
+        });
+      });
+    }).catch(function(e){ el('adm-log-status').textContent='Błąd: '+(e.code||e.message); });
 }
 
 /* ═══════════════ PWA ═══════════════ */
