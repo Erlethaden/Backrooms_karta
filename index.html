@@ -116,6 +116,9 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
 .stat-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:2px 0}
 .stat-lbl{font-size:12px;color:var(--t3);flex:1;min-width:0}
 .stat-lbl small{display:block;font-size:8px;color:var(--t0);letter-spacing:.5px;margin-top:1px}
+.eff{font-size:10px;color:var(--r3);margin-left:2px;white-space:nowrap;display:none;font-weight:700}
+.surv-box{background:var(--bg2);border:1px solid var(--bd2);border-left:3px solid var(--bd3);padding:8px 10px;margin-top:8px;border-radius:2px}
+.surv-title{font-size:10px;letter-spacing:1.5px;color:var(--t2);display:flex;align-items:center;gap:8px;flex-wrap:wrap;text-transform:uppercase}
 .step{display:flex;align-items:center;gap:0;flex-shrink:0;border:1px solid var(--bd2);border-radius:2px;overflow:hidden}
 .step button{width:28px;height:28px;background:var(--bg3);border:none;color:var(--y3);font-size:16px;cursor:pointer;line-height:1}
 .step button:hover{background:var(--y1)}
@@ -286,6 +289,10 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
     <div class="stitle">STAN POSTACI <span class="note">0–10 · zmieniasz Ty i Mistrz Gry</span></div>
     <div id="state-box"></div>
     <div class="hint">Te trzy wskaźniki są wspólne: zmieniasz je sam, a Mistrz Gry może je ustawić zdalnie — zmiana pojawi się tu na żywo.</div>
+    <div class="surv-box" id="surv-box">
+      <div class="surv-title">Stan przetrwania <span class="badge b-ok" id="surv-badge">brak efektu</span></div>
+      <div class="hint" id="surv-detail" style="margin-top:2px"></div>
+    </div>
   </div>
 
   <div class="grid2">
@@ -397,13 +404,13 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
    FIREBASE — wklej config SWOJEGO nowego projektu.
    Zostaw apiKey:"BRAK", żeby apka działała offline (localStorage).
    ═══════════════════════════════════════════════════════ */
-const firebaseConfig = {
-  apiKey: "AIzaSyAhZ5KxLtLusTO0aZ9655CEM07ZNchr7fY",
-  authDomain: "backrooms-b986b.firebaseapp.com",
-  projectId: "backrooms-b986b",
-  storageBucket: "backrooms-b986b.firebasestorage.app",
+var FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyAhZ5KxLtLusTO0aZ9655CEM07ZNchr7fY",
+  authDomain:        "backrooms-b986b.firebaseapp.com",
+  projectId:         "backrooms-b986b",
+  storageBucket:     "backrooms-b986b.firebasestorage.app",
   messagingSenderId: "715664732830",
-  appId: "1:715664732830:web:2c9ea13897c9e8b060c18f"
+  appId:             "1:715664732830:web:2c9ea13897c9e8b060c18f"
 };
 /* Twoje UID (pierwszy MG/admin). Zobaczysz je w Firebase → Authentication → Users
    po pierwszym zalogowaniu. Wklej tu i zapisz plik. */
@@ -446,7 +453,8 @@ function buildStats(){
     var r=document.createElement('div'); r.className='stat-row';
     r.innerHTML='<span class="stat-lbl">'+a.n+'<small>'+a.d+'</small></span>'+
       '<span class="step"><button type="button" data-act="dec">−</button>'+
-      '<input type="number" inputmode="numeric" id="st-'+a.id+'"><button type="button" data-act="inc">+</button></span>';
+      '<input type="number" inputmode="numeric" id="st-'+a.id+'"><button type="button" data-act="inc">+</button></span>'+
+      '<span class="eff" id="eff-'+a.id+'"></span>';
     box.appendChild(r);
     var inp=r.querySelector('input');
     r.querySelector('[data-act=dec]').onclick=function(){ setStat(a.id, stat(a.id)-1); };
@@ -479,6 +487,37 @@ function buildMeters(){
 }
 function meter(id){ return clamp(num(S.meters[id],METER_MAX),0,METER_MAX); }
 function setMeter(id,v){ S.meters[id]=clamp(v,0,METER_MAX); refresh(); pushLive(); }
+
+/* ─── zasady przetrwania: głód / pragnienie / poczytalność ───
+   Liczy się wskaźnik z NAJWIĘKSZYM spadkiem (nie sumujemy trzech).
+   spadek 4  → testy utrudnione (bez kary liczbowej)
+   spadek 6  → -1 do wszystkich statystyk
+   spadek 8  → -2 do wszystkich statystyk
+   spadek 10 → -3 do wszystkich statystyk
+   Statystyka nigdy nie spada poniżej 1. */
+function survivalCalc(syt,nap,pocz){
+  var worst=Math.min(num(syt,METER_MAX),num(nap,METER_MAX),num(pocz,METER_MAX));
+  var drop=METER_MAX-worst;
+  var malus = drop>=10?3 : drop>=8?2 : drop>=6?1 : 0;
+  var hindered = drop>=4;
+  var label = !hindered ? 'brak efektu' : (malus>0 ? 'testy utrudnione · -'+malus+' do statystyk' : 'testy utrudnione');
+  var cls = !hindered ? 'ok' : (malus>=2 ? 'over' : 'warn');
+  return {drop:drop, malus:malus, hindered:hindered, label:label, cls:cls};
+}
+function applySurvival(){
+  var sv=survivalCalc(meter('syt'),meter('nap'),meter('pocz'));
+  var b=el('surv-badge'), d=el('surv-detail');
+  if(b){ b.textContent=sv.label; b.className='badge b-'+sv.cls; }
+  if(d){ d.textContent = sv.hindered
+      ? 'Liczy się wskaźnik z największym spadkiem (spadek: '+sv.drop+'/10). Statystyka nigdy nie spada poniżej 1.'
+      : 'Wszystkie wskaźniki w normie (spadek: '+sv.drop+'/10, próg efektu: 4).'; }
+  STATS.forEach(function(a){
+    var e=el('eff-'+a.id); if(!e) return;
+    var base=stat(a.id), eff=Math.max(1, base-sv.malus);
+    if(sv.malus>0 && eff!==base){ e.textContent='→ '+eff; e.style.display='inline'; }
+    else { e.textContent=''; e.style.display='none'; }
+  });
+}
 
 function buildSlots(){
   var eq=el('eq-box'); eq.innerHTML='';
@@ -536,6 +575,7 @@ function refresh(){
 
   paintSlots();
   applyBagLock();
+  applySurvival();
   markDirty();
 }
 function paintSlots(){
@@ -915,13 +955,16 @@ function gmRender(){
   el('gm-empty').style.display=gmRoster.length?'none':'block';
   var g=el('gm-roster-grid'); g.innerHTML='';
   gmRoster.forEach(function(c){
+    var sv=survivalCalc(c.syt,c.nap,c.pocz);
     var card=document.createElement('div'); card.className='gm-card'; card.onclick=function(){ gmDetail(c.id); };
     card.innerHTML=
       (c.portret?'<img class="gm-por" src="'+c.portret+'" alt="">':'')+
       '<div class="gm-card-name">'+escHtml(c.imie||'???')+'</div>'+
       '<div class="gm-card-sub">'+escHtml(c.nick||'—')+' · '+escHtml(c.level||'poziom ?')+'</div>'+
       bar('Sytość',c.syt,METER_MAX)+bar('Napój',c.nap,METER_MAX)+bar('Poczyt.',c.pocz,METER_MAX)+
-      '<div class="gm-ts">'+(c.plecak?'<span class="chip on">plecak</span>':'<span class="chip lock">plecak 🔒</span>')+' · '+timeAgo(c.lastModified)+'</div>';
+      '<div class="gm-ts">'+(c.plecak?'<span class="chip on">plecak</span>':'<span class="chip lock">plecak 🔒</span>')+
+        (sv.hindered?' <span class="chip '+(sv.malus>0?'lock':'on')+'" style="border-color:var(--r2);color:var(--r3)">'+sv.label+'</span>':'')+
+        ' · '+timeAgo(c.lastModified)+'</div>';
     g.appendChild(card);
   });
 }
@@ -963,8 +1006,13 @@ function gmDetail(id,keepScroll){
   h+='</div>';
 
   /* ── podgląd karty ── */
+  var svGm=survivalCalc(c.syt,c.nap,c.pocz);
   h+='<div class="gd-sec">STATYSTYKI</div>';
-  STATS.forEach(function(a){ h+=gdRow(a.n, num((d0.stats||{})[a.id],STAT_MIN)); });
+  h+='<div class="gd-row"><span class="gd-l">Stan przetrwania</span><span class="gd-v"><span class="badge b-'+svGm.cls+'">'+svGm.label+'</span></span></div>';
+  STATS.forEach(function(a){
+    var base=num((d0.stats||{})[a.id],STAT_MIN), eff=Math.max(1, base-svGm.malus);
+    h+=gdRow(a.n, base + (svGm.malus>0 && eff!==base ? ' <span style="color:var(--r3)">→ '+eff+'</span>' : ''));
+  });
   if(d0['f-opis']){ h+='<div class="gd-sec">OPIS</div><div class="gd-row"><span class="gd-v" style="white-space:pre-wrap">'+escHtml(d0['f-opis'])+'</span></div>'; }
   var lvls=(d0.levels||[]);
   h+='<div class="gd-sec">ODWIEDZONE POZIOMY</div><div class="gd-row"><span class="gd-v">'+(lvls.length?escHtml(lvls.join(' · ')):'—')+'</span></div>';
