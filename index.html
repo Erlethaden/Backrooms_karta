@@ -580,15 +580,15 @@ function buildSlots(){
   for(var j=0;j<BAG_SLOTS;j++) bag.appendChild(slotRow('bag',j));
 }
 function slotRow(kind,i){
-  var arr = kind==='eq'?S.eq:S.bag;
+  function arr(){ return kind==='eq'?S.eq:S.bag; }
   var row=document.createElement('div'); row.className='slot';
   row.innerHTML='<span class="num">'+(i+1)+'</span>'+
     '<div class="chk" data-i="'+i+'">✓</div>'+
     '<input placeholder="................................">';
   var chk=row.querySelector('.chk'), inp=row.querySelector('input');
-  function paint(){ chk.classList.toggle('on', !!(arr[i]&&arr[i].on)); inp.value=(arr[i]&&arr[i].txt)||''; }
-  chk.onclick=function(){ arr[i]=arr[i]||{on:false,txt:''}; arr[i].on=!arr[i].on; chk.classList.toggle('on',arr[i].on); markDirty(); };
-  inp.oninput=function(){ arr[i]=arr[i]||{on:false,txt:''}; arr[i].txt=inp.value; markDirty(); };
+  function paint(){ var a=arr(); chk.classList.toggle('on', !!(a[i]&&a[i].on)); inp.value=(a[i]&&a[i].txt)||''; }
+  chk.onclick=function(){ var a=arr(); a[i]=a[i]||{on:false,txt:''}; a[i].on=!a[i].on; chk.classList.toggle('on',a[i].on); markDirty(); };
+  inp.oninput=function(){ var a=arr(); a[i]=a[i]||{on:false,txt:''}; a[i].txt=inp.value; markDirty(); };
   row._paint=paint; paint();
   return row;
 }
