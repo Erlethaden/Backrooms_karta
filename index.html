@@ -187,6 +187,8 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
 .gm-pane{display:none}.gm-pane.on{display:block}
 .gm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
 .gm-card{background:var(--bg2);border:1px solid var(--bd1);border-top:2px solid var(--y1);padding:10px;cursor:pointer;border-radius:2px}
+.gm-card.dead{filter:grayscale(1);opacity:.5;border-top-color:var(--bd1)}
+.gm-card.dead:hover{opacity:.75}
 .gm-card:hover{border-color:var(--y2)}
 .gm-card-name{font-size:13px;color:var(--y3);letter-spacing:1px}
 .gm-card-sub{font-size:9px;color:var(--t0);margin-bottom:7px}
@@ -265,6 +267,10 @@ button,input,select,textarea{font-family:'JetBrains Mono',monospace}
       <div class="idrow"><label>Imię i nazw.</label><input id="f-imie" maxlength="40" placeholder="imię i nazwisko"></div>
       <div class="idrow desc"><label>Krótki opis</label><textarea id="f-opis" maxlength="600" placeholder="kim jest, jak wygląda, skąd trafił do Backrooms…"></textarea></div>
     </div>
+  </div>
+
+  <div id="dead-banner" style="display:none;background:#2a0d0d;border:1px solid var(--r2);border-left:3px solid var(--r2);color:var(--r3);padding:9px 12px;margin-bottom:14px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;text-align:center">
+    ☠ Postać martwa — status ustawia Mistrz Gry
   </div>
 
   <div class="sec">
@@ -476,7 +482,7 @@ var EQ_SLOTS=3, BAG_SLOTS=10;
 var TXT_FIELDS=['f-imie','f-opis','f-level','f-umiej','f-notatki'];
 
 /* ─── stan lokalny ─── */
-var S = { stats:{}, levels:[], eq:[], bag:[], meters:{}, bagUnlocked:false };
+var S = { stats:{}, levels:[], eq:[], bag:[], meters:{}, bagUnlocked:false, martwa:false };
 var loading=false, suppressSave=false, dirtyTimer=null, cloudTimer=null;
 
 function el(id){ return document.getElementById(id); }
@@ -630,6 +636,7 @@ function refresh(){
   paintSlots();
   applyBagLock();
   applySurvival();
+  var db=el('dead-banner'); if(db) db.style.display=S.martwa?'block':'none';
   markDirty();
 }
 function paintSlots(){
@@ -673,7 +680,7 @@ function collectSheet(){
   return d0;
 }
 /* pełny pakiet do chmury: sheet + live (mierniki + plecak + obecny poziom) */
-function collectLive(){ return { syt:meter('syt'), nap:meter('nap'), pocz:meter('pocz'), plecak:!!S.bagUnlocked, level:(el('f-level').value||'') }; }
+function collectLive(){ return { syt:meter('syt'), nap:meter('nap'), pocz:meter('pocz'), plecak:!!S.bagUnlocked, level:(el('f-level').value||''), martwa:!!S.martwa }; }
 
 function applySheet(d0){
   if(!d0) return;
@@ -700,6 +707,7 @@ function applyLive(live, opts){
     if(live[m.id]!==undefined) S.meters[m.id]=clamp(num(live[m.id],METER_MAX),0,METER_MAX);
   });
   if(live.plecak!==undefined) S.bagUnlocked=!!live.plecak;
+  if(live.martwa!==undefined) S.martwa=!!live.martwa;
   if(live.level!==undefined){
     var lv=el('f-level');
     if(!(opts.skipFocused && document.activeElement===lv)) lv.value=live.level;
@@ -727,6 +735,7 @@ function flash(t){ var m=el('save-msg'); m.textContent=t; setTimeout(function(){
 function resetSheet(){
   STATS.forEach(function(a){ S.stats[a.id]={a:STAT_MIN,g:0}; });
   var gb=el('f-gotowa'); if(gb) gb.checked=false;
+  S.martwa=false;
   METERS.forEach(function(m){ S.meters[m.id]=METER_MAX; });
   S.levels=['Level 0']; S.eq=[]; S.bag=[]; S.bagUnlocked=false;
   setPortrait('');
@@ -997,14 +1006,14 @@ function claimName(slug,charId){
 function loadCharList(){
   if(!fbUser||!fbDB) return;
   fbDB.collection('users').doc(fbUser.uid).collection('characters').orderBy('lastModified','desc').get().then(function(snap){
-    charCache=snap.docs.map(function(x){ var v=x.data(); return {id:x.id, imie:v.imie, slug:v.nameSlug}; });
+    charCache=snap.docs.map(function(x){ var v=x.data(); return {id:x.id, imie:v.imie, slug:v.nameSlug, martwa:!!(v.live&&v.live.martwa)}; });
     rebuildCharSelect();
     if(!currentCharId && charCache.length) openChar(charCache[0].id);
   }).catch(function(e){ cloudStatus('błąd listy: '+e.code,'r'); });
 }
 function rebuildCharSelect(){
   var s=el('char-select'); s.innerHTML='<option value="">— wybierz postać —</option>';
-  charCache.forEach(function(c){ var o=document.createElement('option'); o.value=c.id; o.textContent=c.imie||'bez imienia'; if(c.id===currentCharId) o.selected=true; s.appendChild(o); });
+  charCache.forEach(function(c){ var o=document.createElement('option'); o.value=c.id; o.textContent=(c.martwa?'☠ ':'')+(c.imie||'bez imienia')+(c.martwa?' (martwa)':''); if(c.martwa) o.style.color='#6b6555'; if(c.id===currentCharId) o.selected=true; s.appendChild(o); });
 }
 function onCharSelect(id){ if(id) openChar(id); }
 function openChar(id){
@@ -1120,10 +1129,10 @@ function gmRender(){
   var g=el('gm-roster-grid'); g.innerHTML='';
   gmRoster.forEach(function(c){
     var sv=survivalCalc(c.syt,c.nap,c.pocz);
-    var card=document.createElement('div'); card.className='gm-card'; card.onclick=function(){ gmDetail(c.id); };
+    var card=document.createElement('div'); card.className='gm-card'+(c.martwa?' dead':''); card.onclick=function(){ gmDetail(c.id); };
     card.innerHTML=
       (c.portret?'<img class="gm-por" src="'+c.portret+'" alt="">':'')+
-      '<div class="gm-card-name">'+escHtml(c.imie||'???')+'</div>'+
+      '<div class="gm-card-name">'+escHtml(c.imie||'???')+(c.martwa?' <span class="chip" style="border-color:var(--r2);color:var(--r3)">☠ martwa</span>':'')+'</div>'+
       '<div class="gm-card-sub">'+escHtml(c.nick||'—')+' · '+escHtml(c.level||'poziom ?')+'</div>'+
       bar('Sytość',c.syt,METER_MAX)+bar('Napój',c.nap,METER_MAX)+bar('Poczyt.',c.pocz,METER_MAX)+
       '<div class="gm-ts">'+(c.plecak?'<span class="chip on">plecak</span>':'<span class="chip lock">plecak 🔒</span>')+
@@ -1165,6 +1174,8 @@ function gmDetail(id,keepScroll){
   });
   h+='<div class="gm-edit-row"><span class="gm-edit-l">Plecak</span>'+
      '<label class="toggle"><input type="checkbox" id="gm-plecak" '+(c.plecak?'checked':'')+' onchange="gmSetBag(\''+id+'\',this.checked)"> odblokowany dla gracza</label></div>';
+  h+='<div class="gm-edit-row"><span class="gm-edit-l">Postać martwa</span>'+
+     '<label class="toggle"><input type="checkbox" id="gm-martwa" '+(c.martwa?'checked':'')+' onchange="gmSetDead(\''+id+'\',this.checked)"> martwa (wyszarza na liście)</label></div>';
   h+='<div class="gm-edit-row"><span class="gm-edit-l">Obecny poziom</span>'+
      '<input class="mod-in" style="flex:1;font-size:12px;padding:5px 8px" id="gm-level" value="'+escHtml(c.level||'')+'" onchange="gmSetLevel(\''+id+'\',this.value)"></div>';
   h+='</div>';
@@ -1204,11 +1215,11 @@ function gmWrite(id, patch){
   fbDB.collection('users').doc(c.uid).collection('characters').doc(id)
     .set(patch,{merge:true}).catch(function(e){ toast('MG: brak zapisu ('+(e.code||e.message)+')'); });
   var rp={ lastModified:firebase.firestore.FieldValue.serverTimestamp() };
-  if(patch.live){ rp.syt=patch.live.syt; rp.nap=patch.live.nap; rp.pocz=patch.live.pocz; rp.plecak=patch.live.plecak; if(patch.live.level!==undefined) rp.level=patch.live.level; }
+  if(patch.live){ rp.syt=patch.live.syt; rp.nap=patch.live.nap; rp.pocz=patch.live.pocz; rp.plecak=patch.live.plecak; if(patch.live.level!==undefined) rp.level=patch.live.level; if(patch.live.martwa!==undefined) rp.martwa=patch.live.martwa; }
   fbDB.collection('roster').doc(id).set(rp,{merge:true}).catch(function(){});
 }
 function gmCurLive(id){ var c=gmRoster.filter(function(x){return x.id===id;})[0]||{};
-  return { syt:num(c.syt,METER_MAX), nap:num(c.nap,METER_MAX), pocz:num(c.pocz,METER_MAX), plecak:!!c.plecak, level:(c.level||'') }; }
+  return { syt:num(c.syt,METER_MAX), nap:num(c.nap,METER_MAX), pocz:num(c.pocz,METER_MAX), plecak:!!c.plecak, level:(c.level||''), martwa:!!c.martwa }; }
 function gmSetMeter(id,key,val){ var live=gmCurLive(id); live[key]=clamp(num(val,0),0,METER_MAX); gmWrite(id,{live:live}); }
 function gmBump(id,key,d){ var live=gmCurLive(id); live[key]=clamp(live[key]+d,0,METER_MAX); gmWrite(id,{live:live}); }
 function gmSetBag(id,on){ var live=gmCurLive(id); live.plecak=!!on; gmWrite(id,{live:live});
@@ -1217,6 +1228,9 @@ function gmSetBag(id,on){ var live=gmCurLive(id); live.plecak=!!on; gmWrite(id,{
 function gmSetLevel(id,val){ var live=gmCurLive(id); live.level=val; gmWrite(id,{live:live});
   var c=gmRoster.filter(function(x){return x.id===id;})[0];
   logEvent('MG: zmiana poziomu', ((c&&c.imie)||id)+' → '+val); }
+function gmSetDead(id,on){ var live=gmCurLive(id); live.martwa=!!on; gmWrite(id,{live:live});
+  var c=gmRoster.filter(function(x){return x.id===id;})[0];
+  logEvent('MG: postać '+(on?'oznaczona jako martwa':'przywrócona do życia'), (c&&c.imie)||id); }
 
 /* ═══════════════ PANEL ADMINA (nadawanie MG) ═══════════════ */
 function admLoad(){
@@ -1256,10 +1270,11 @@ function admLoadChars(){
   }).catch(function(e){ el('adm-char-status').textContent='Błąd: '+(e.code||e.message); });
 }
 function admRenderChars(){
-  var h='<tr><th>IMIĘ</th><th>GRACZ</th><th>POZIOM</th><th>PLECAK</th><th></th></tr>';
+  var h='<tr><th>IMIĘ</th><th>GRACZ</th><th>POZIOM</th><th>PLECAK</th><th>STATUS</th><th></th></tr>';
   admChars.forEach(function(c){
-    h+='<tr><td>'+escHtml(c.imie||'???')+'</td><td>'+escHtml(c.nick||'—')+'</td><td>'+escHtml(c.level||'—')+'</td>'+
+    h+='<tr'+(c.martwa?' style="opacity:.55"':'')+'><td>'+escHtml(c.imie||'???')+'</td><td>'+escHtml(c.nick||'—')+'</td><td>'+escHtml(c.level||'—')+'</td>'+
        '<td>'+(c.plecak?'<span class="chip on">odblokowany</span>':'<span class="chip lock">zablokowany</span>')+'</td>'+
+       '<td>'+(c.martwa?'<span class="chip" style="border-color:var(--r2);color:var(--r3)">☠ martwa</span>':'<span class="chip on">żywa</span>')+'</td>'+
        '<td><button class="btn btn-sm btn-red" onclick="adminDeleteChar(\''+c.id+'\')">Usuń</button></td></tr>';
   });
   el('adm-chars').innerHTML=h||'<tr><td>brak kart</td></tr>';
